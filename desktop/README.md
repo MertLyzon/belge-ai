@@ -23,7 +23,7 @@ The Windows installer is built on a Windows runner with GitHub Actions:
 
 1. Push the repository to GitHub.
 2. Open **Actions > Windows uygulamasini derle > Run workflow**.
-3. Download the `belge-ai-windows-x86_64` artifact when the job finishes.
+3. Download the `belge-ai-windows-x64` artifact when the job finishes.
 4. Extract and run `BelgeAI_*_x64-setup.exe` on Windows 10 or Windows 11.
 
 Pushing a version tag such as `v0.1.0` also starts this build automatically.
