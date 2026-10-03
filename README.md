@@ -1,55 +1,61 @@
 # belge.ai
 
-PDF belgelerini cihazdan dışarı göndermeden analiz eden, sorulara belge içinden alıntı ve gerçek sayfa kaynağıyla cevap veren Türkçe belge asistanı.
+Local-first, privacy-focused PDF document assistant. `belge.ai` extracts PDF text on-device, answers questions from the document and links every answer to its source page.
 
-## Özellikler
+![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
 
-- PDF.js ile gerçek, sayfa bazlı metin çıkarma
-- Otomatik özet ve anahtar kelime üretimi
-- Belge içinde yerel benzerlik araması
-- Cevabın geldiği gerçek sayfayı gösterme
-- PDF yükleme ve sürükle-bırak akışı
-- Masaüstü ve mobil uyumlu arayüz
-- Yükleme, hata ve yanıt bekleme durumları
-- WebMCP üzerinden `ask_document` aracı
+## Highlights
 
-## Teknolojiler
+- Native macOS desktop application built with Tauri
+- Page-by-page PDF extraction with PDF.js
+- Local summaries, keyword analysis and document search
+- Answers linked to the original source page
+- Drag-and-drop and native file selection
+- No uploads, accounts or API keys required
+- Documents remain in memory and are cleared when the app closes
 
-- React 19 ve TypeScript
-- Vinext / Vite
-- Tailwind CSS
-- PDF.js
-- Shadcn tabanlı erişilebilir arayüz bileşenleri
-- Cloudflare Workers uyumlu dağıtım
+## Project structure
 
-## Yerel geliştirme
+```text
+desktop/       Tauri + React desktop application
+app/           Original web prototype
+components/    Web prototype UI primitives
+```
 
-Node.js 22.13 veya üzeri gerekir.
+## Run the desktop app
+
+Requirements: Node.js 22+, Rust and the platform-specific Tauri prerequisites.
 
 ```bash
+cd desktop
 npm install
-npm run dev
+npm run tauri dev
 ```
 
-Üretim derlemesini doğrulamak için:
+Create a production application bundle:
 
 ```bash
-npm run build
+cd desktop
+npm run tauri build
 ```
 
-## Durum
+## Current search model
 
-Mevcut sürüm gerçek PDF metnini tarayıcıda işler ve anahtarsız çalışır. Yanıtlar şimdilik anahtar kelime tabanlı extractive search ile üretilir; sonraki aşamada embedding ve OpenAI tabanlı RAG eklenecektir.
+The current version is deliberately API-free. It ranks sentences using normalized query terms and returns extractive answers from the best matching page. This keeps the first release fast, private and fully offline.
 
-## Yol haritası
+## Roadmap
 
-- [x] PDF metnini sayfa bazında çıkarma
-- [x] Yerel arama ve gerçek sayfa kaynağı
-- [ ] Metin parçalama ve vektör arama
-- [ ] Gerçek RAG yanıtları ve kaynak doğrulama
-- [ ] Kullanıcı oturumu ve belge geçmişi
-- [ ] Birim ve uçtan uca testler
+- [x] Native desktop application
+- [x] Page-based PDF extraction
+- [x] Local search with real source pages
+- [ ] Local SQLite document library
+- [ ] Embedding-based semantic search
+- [ ] Optional local LLM through Ollama
+- [ ] Optional OpenAI-powered RAG mode
+- [ ] Signed macOS and Windows installers
 
-## Lisans
+## License
 
 MIT
