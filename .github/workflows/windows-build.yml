@@ -1,0 +1,46 @@
+name: Windows uygulamasini derle
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64 NSIS
+    runs-on: windows-latest
+
+    steps:
+      - name: Kaynak kodu al
+        uses: actions/checkout@v4
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Rust kur
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust onbellegini etkinlestir
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: JavaScript bagimliliklarini kur
+        working-directory: desktop
+        run: npm ci
+
+      - name: Windows kurulum dosyasini olustur
+        uses: tauri-apps/tauri-action@v1
+        with:
+          projectPath: desktop
+          args: --bundles nsis
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: belge-ai-windows-[arch]
