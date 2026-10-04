@@ -8,10 +8,13 @@ Local-first, privacy-focused PDF document assistant. `belge.ai` extracts PDF tex
 
 ## Highlights
 
-- Native macOS desktop application built with Tauri
+- Native Windows and macOS desktop application built with Tauri
 - Page-by-page PDF extraction with PDF.js
 - Local summaries, keyword analysis and document search
 - Answers linked to the original source page
+- Conversation history with copyable answers
+- Responsive source panel with highlighted search terms
+- Processing progress, clear empty states and practical error messages
 - Drag-and-drop and native file selection
 - No uploads, accounts or API keys required
 - Documents remain in memory and are cleared when the app closes
