@@ -17,7 +17,7 @@ Local-first, privacy-focused PDF document assistant. `belge.ai` extracts PDF tex
 - Processing progress, clear empty states and practical error messages
 - Drag-and-drop and native file selection
 - No uploads, accounts or API keys required
-- Documents remain in memory and are cleared when the app closes
+- Local document library keeps extracted text and conversations available between sessions
 
 ## Project structure
 
@@ -53,7 +53,7 @@ The current version is deliberately API-free. It ranks sentences using normalize
 - [x] Native desktop application
 - [x] Page-based PDF extraction
 - [x] Local search with real source pages
-- [ ] Local SQLite document library
+- [x] Persistent local document library
 - [ ] Embedding-based semantic search
 - [ ] Optional local LLM through Ollama
 - [ ] Optional OpenAI-powered RAG mode

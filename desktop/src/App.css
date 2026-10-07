@@ -43,12 +43,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .search-results button span { color: var(--accent); font-size: 9px; font-weight: 700; }
 .search-results button p { overflow: hidden; margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .section-label { margin: 25px 9px 8px; color: rgba(255,255,255,.23); font-size: 8px; font-weight: 750; letter-spacing: .14em; }
+.section-label.library-label { display: flex; align-items: center; justify-content: space-between; margin-top: 21px; }
+.section-label.library-label small { display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 99px; color: rgba(255,255,255,.38); background: rgba(255,255,255,.055); font-size: 8px; letter-spacing: 0; }
 .document-item { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 11px 9px; border: 1px solid transparent; border-radius: 10px; color: rgba(255,255,255,.35); background: transparent; text-align: left; cursor: pointer; }
 .document-item:hover, .document-item.active { border-color: rgba(255, 255, 255, .05); color: var(--accent); background: rgba(255,255,255,.05); }
 .document-item span { min-width: 0; }
 .document-item strong { display: block; overflow: hidden; color: rgba(255,255,255,.78); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .document-item small { display: block; overflow: hidden; margin-top: 5px; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .no-document { display: flex; align-items: center; gap: 8px; padding: 12px 9px; color: rgba(255,255,255,.22); font-size: 10px; }
+.no-document.compact { padding-top: 7px; font-size: 9px; line-height: 1.4; }
+.recent-list { min-height: 0; overflow-y: auto; }
+.recent-list::-webkit-scrollbar { width: 5px; }
+.recent-list::-webkit-scrollbar-thumb { border-radius: 9px; background: rgba(255,255,255,.08); }
+.recent-row { display: grid; grid-template-columns: minmax(0, 1fr) 27px; align-items: center; margin-bottom: 3px; border: 1px solid transparent; border-radius: 10px; transition: border-color .15s ease, background .15s ease; }
+.recent-row:hover, .recent-row.active { border-color: rgba(255,255,255,.06); background: rgba(255,255,255,.04); }
+.recent-row.active { border-color: rgba(215,255,87,.11); background: rgba(215,255,87,.035); }
+.recent-document { display: flex; min-width: 0; align-items: flex-start; gap: 9px; padding: 9px 3px 9px 8px; border: 0; color: rgba(255,255,255,.28); background: transparent; text-align: left; cursor: pointer; }
+.recent-document:disabled { cursor: wait; }
+.recent-document > span { min-width: 0; }
+.recent-document strong { display: block; overflow: hidden; color: rgba(255,255,255,.65); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.recent-document small { display: block; overflow: hidden; margin-top: 4px; color: rgba(255,255,255,.23); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.recent-row.active .recent-document, .recent-row.active .recent-document strong { color: var(--accent); }
+.delete-document { display: grid; width: 25px; height: 25px; place-items: center; border: 0; border-radius: 7px; color: transparent; background: transparent; cursor: pointer; }
+.recent-row:hover .delete-document, .delete-document:focus-visible { color: rgba(255,255,255,.28); }
+.delete-document:hover { color: #ff858c !important; background: rgba(255,107,116,.08); }
 .privacy-card { display: flex; gap: 9px; margin-top: auto; padding: 13px; border: 1px solid rgba(215, 255, 87, .12); border-radius: 13px; color: var(--accent); background: rgba(215, 255, 87, .035); }
 .privacy-card strong { display: block; font-size: 10px; }
 .privacy-card p { margin: 5px 0 0; color: rgba(255,255,255,.32); font-size: 8px; line-height: 1.45; }
