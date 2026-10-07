@@ -1,4 +1,4 @@
-name: Windows uygulamasini derle
+name: Masaustu uygulamalarini derle
 
 on:
   workflow_dispatch:
@@ -44,3 +44,38 @@ jobs:
           args: --bundles nsis
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: belge-ai-windows-[arch]
+
+  build-macos:
+    name: macOS Apple Silicon DMG
+    runs-on: macos-15
+
+    steps:
+      - name: Kaynak kodu al
+        uses: actions/checkout@v5
+
+      - name: Node.js kur
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Rust kur
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust onbellegini etkinlestir
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: JavaScript bagimliliklarini kur
+        working-directory: desktop
+        run: npm ci
+
+      - name: macOS disk imajini olustur
+        uses: tauri-apps/tauri-action@v1
+        with:
+          projectPath: desktop
+          args: --bundles dmg
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: belge-ai-macos-[arch]

@@ -1,6 +1,6 @@
 [package]
 name = "belge-ai"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local-first, privacy-focused PDF document assistant"
 authors = ["Mert"]
 edition = "2021"
