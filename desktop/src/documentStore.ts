@@ -1,10 +1,18 @@
-export type PdfPage = { number: number; text: string };
+export type PdfPage = {
+  number: number;
+  text: string;
+  /** Satır düzeni yeni belgelerde korunur; eski kütüphane kayıtlarında bulunmayabilir. */
+  lines?: string[];
+  /** PDF'deki daha büyük puntoyla yazılmış olası başlıklar. */
+  headings?: string[];
+};
 
 export type SearchResult = {
   answer: string;
   page: number;
   excerpt: string;
   terms: string[];
+  kind?: "direct" | "extractive" | "not-found";
 };
 
 export type ChatMessage = SearchResult & {

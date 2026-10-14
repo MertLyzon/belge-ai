@@ -10,6 +10,9 @@ Local-first, privacy-focused PDF document assistant. `belge.ai` extracts PDF tex
 
 - Native Windows and macOS desktop application built with Tauri
 - Page-by-page PDF extraction with PDF.js
+- Multilingual, document-aware local answers for CVs, contracts and reports
+- Direct CV answers for identity, experience, education, skills and contact details
+- Layout-aware PDF extraction that preserves lines and section headings
 - Local summaries, keyword analysis and document search
 - Answers linked to the original source page
 - Real PDF page preview with a searchable extracted-text view
@@ -46,9 +49,9 @@ cd desktop
 npm run tauri build
 ```
 
-## Current search model
+## Current answer engine
 
-The current version is deliberately API-free. It ranks sentences using normalized query terms and returns extractive answers from the best matching page. This keeps the first release fast, private and fully offline.
+The current version is deliberately API-free. It identifies common document types and question intent, maps Turkish and English concepts, extracts structured CV details and falls back to source-grounded passage ranking. This keeps the app fast, private and fully offline while handling natural questions more reliably.
 
 ## Roadmap
 

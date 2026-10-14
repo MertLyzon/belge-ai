@@ -7,9 +7,10 @@ import {
 } from "lucide-react";
 import "./App.css";
 import PdfPreview from "./PdfPreview";
+import { answerQuestion, suggestedQuestions } from "./chatEngine";
 import {
   deleteStoredDocument, getStoredDocument, listStoredDocuments, saveDocumentMessages,
-  saveStoredDocument, type ChatMessage, type PdfPage, type SearchResult,
+  saveStoredDocument, type ChatMessage, type PdfPage,
   type StoredDocumentSummary,
 } from "./documentStore";
 
@@ -59,53 +60,6 @@ function topKeywords(pages: PdfPage[]) {
     .map(([word]) => word.charAt(0).toLocaleUpperCase("tr") + word.slice(1));
 }
 
-function expandedQueryTerms(question: string) {
-  const terms = new Set(tokenize(question));
-  const normalized = question.toLocaleLowerCase("tr");
-  if (/tarih|süre|zaman|ne zaman/.test(normalized)) {
-    ["tarih", "süre", "gün", "hafta", "ay", "yıl", "başla", "bitiş", "geçerli"].forEach((term) => terms.add(term));
-  }
-  if (/yükümlülük|sorumluluk|görev|taahhüt/.test(normalized)) {
-    ["yükümlülük", "sorumluluk", "taahhüt", "zorunlu", "gerekli"].forEach((term) => terms.add(term));
-  }
-  return [...terms];
-}
-
-function wordMatchScore(word: string, term: string) {
-  if (word === term) return 3;
-  if (term.length >= 5 && (word.startsWith(term) || term.startsWith(word))) return 2;
-  return 0;
-}
-
-function searchDocument(question: string, pages: PdfPage[]): SearchResult {
-  const terms = expandedQueryTerms(question);
-  const rows = pages.flatMap((page) => sentences(page.text).map((text) => {
-    const words = tokenize(text);
-    const score = terms.reduce(
-      (total, term) => total + words.reduce((termScore, word) => termScore + wordMatchScore(word, term), 0),
-      0,
-    );
-    return { page: page.number, text, score };
-  })).sort((a, b) => b.score - a.score);
-  const best = rows[0];
-  if (!best || best.score === 0) {
-    const fallback = pages.find((page) => page.text);
-    return {
-      answer: "Bu sorunun cevabını belgede güvenilir biçimde bulamadım. Daha belirgin bir ifade veya anahtar kelimeyle tekrar deneyebilirsin.",
-      page: fallback?.number ?? 1,
-      excerpt: fallback?.text.slice(0, 1200) ?? "",
-      terms,
-    };
-  }
-  const supporting = rows.find((row) => row.page === best.page && row.text !== best.text && row.score > 0);
-  return {
-    answer: [best.text, supporting?.text].filter(Boolean).join(" "),
-    page: best.page,
-    excerpt: pages.find((page) => page.number === best.page)?.text.slice(0, 1600) ?? best.text,
-    terms,
-  };
-}
-
 async function extractPdf(data: ArrayBuffer, onProgress: (current: number, total: number) => void) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -115,9 +69,32 @@ async function extractPdf(data: ArrayBuffer, onProgress: (current: number, total
     onProgress(number, document.numPages);
     const page = await document.getPage(number);
     const content = await page.getTextContent();
-    const text = content.items.map((item) => ("str" in item ? item.str : ""))
-      .join(" ").replace(/\s+/g, " ").trim();
-    pages.push({ number, text });
+    const items = content.items.filter((item): item is typeof item & { str: string; transform: number[]; height: number } =>
+      "str" in item && Boolean(item.str.trim()) && "transform" in item,
+    );
+    const grouped: Array<{ y: number; height: number; parts: Array<{ x: number; text: string }> }> = [];
+    for (const item of items) {
+      const x = item.transform[4] ?? 0;
+      const y = item.transform[5] ?? 0;
+      let row = grouped.find((candidate) => Math.abs(candidate.y - y) <= 2.5);
+      if (!row) {
+        row = { y, height: item.height || Math.abs(item.transform[3] ?? 0), parts: [] };
+        grouped.push(row);
+      }
+      row.height = Math.max(row.height, item.height || Math.abs(item.transform[3] ?? 0));
+      row.parts.push({ x, text: item.str.trim() });
+    }
+    grouped.sort((a, b) => b.y - a.y);
+    const rows = grouped.map((row) => ({
+      ...row,
+      text: row.parts.sort((a, b) => a.x - b.x).map((part) => part.text).join(" ").replace(/\s+/g, " ").trim(),
+    })).filter((row) => row.text);
+    const bodyHeights = rows.map((row) => row.height).filter((height) => height > 0).sort((a, b) => a - b);
+    const medianHeight = bodyHeights[Math.floor(bodyHeights.length / 2)] ?? 0;
+    const lines = rows.map((row) => row.text);
+    const headings = rows.filter((row) => row.height >= medianHeight * 1.18 && row.text.length <= 70)
+      .map((row) => row.text).slice(0, 20);
+    pages.push({ number, text: lines.join("\n"), lines, headings });
   }
   return pages;
 }
@@ -184,6 +161,7 @@ function App() {
   const hasDocument = pages.length > 0;
   const summary = useMemo(() => (hasDocument ? makeSummary(pages) : ""), [hasDocument, pages]);
   const tags = useMemo(() => topKeywords(pages), [pages]);
+  const suggestionItems = useMemo(() => suggestedQuestions(pages), [pages]);
   const wordCount = useMemo(() => pages.reduce((sum, page) => sum + tokenize(page.text).length, 0), [pages]);
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
   const searchMatches = useMemo(() => {
@@ -374,7 +352,7 @@ function App() {
     setQuestion("");
     setIsAnswering(true);
     await new Promise((resolve) => window.setTimeout(resolve, 260));
-    const result = searchDocument(clean, pages);
+    const result = answerQuestion(clean, pages);
     messageId.current += 1;
     const nextMessage = { id: messageId.current, question: clean, ...result };
     setMessages((current) => {
@@ -428,12 +406,6 @@ function App() {
       });
     }
   }
-
-  const suggestionItems = [
-    "Belgenin ana konusu nedir?",
-    "Önemli tarih ve süreleri bul",
-    "Tarafların yükümlülükleri neler?",
-  ];
 
   return (
     <div className={`app-shell ${sourceOpen ? "source-visible" : "source-hidden"}`}
@@ -491,7 +463,7 @@ function App() {
             <section className="summary-card"><div className="summary-heading"><span className="response-icon violet"><Sparkles size={17} /></span><div><small>OTOMATİK ÖZET</small><h2>Belgenin kısa özeti</h2></div><button className="summary-copy" onClick={() => void copyText(summary, 0)} title="Özeti kopyala">{copiedId === 0 ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{summary}</p><div className="tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div></section>
             {messages.length === 0 && <section className="suggestions"><small>HIZLI BAŞLANGIÇ</small><h3>Bu belgeye ne sormak istersin?</h3><div>{suggestionItems.map((item) => <button key={item} onClick={() => void ask(item)}>{item}<ArrowUp size={13} /></button>)}</div></section>}
             <div className="message-list">
-              {messages.map((message) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>Belgeden bulunan yanıt</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p><button className="source-chip" onClick={() => showSource(message.page, message.terms, "text")}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı aç</button></div></div></article>)}
+              {messages.map((message) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>{message.kind === "direct" ? "Akıllı belge yanıtı" : message.kind === "not-found" ? "Belgede bulunamadı" : "Belgeden bulunan yanıt"}</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p>{message.kind !== "not-found" && <button className="source-chip" onClick={() => showSource(message.page, message.terms, "text")}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı aç</button>}</div></div></article>)}
               {isAnswering && <div className="assistant-message thinking"><span className="response-icon"><LoaderCircle size={17} className="spinner" /></span><div><h2>Belgede aranıyor</h2><span><i /><i /><i /></span></div></div>}
             </div>
             <div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} placeholder="Bu belge hakkında bir şey sor…" rows={2} disabled={isAnswering} /><div><span>Enter ile gönder · Shift + Enter ile yeni satır</span><button aria-label="Soruyu gönder" disabled={!question.trim() || status !== "ready" || isAnswering} onClick={() => void ask()}><ArrowUp size={17} /></button></div></div>
