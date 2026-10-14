@@ -79,3 +79,9 @@ jobs:
           args: --bundles dmg
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: belge-ai-macos-[arch]
+
+      - name: macOS imzasini ve disk imajini dogrula
+        shell: bash
+        run: |
+          codesign --verify --deep --strict --verbose=2 desktop/src-tauri/target/release/bundle/macos/BelgeAI.app
+          hdiutil verify desktop/src-tauri/target/release/bundle/dmg/BelgeAI_*.dmg

@@ -13,11 +13,11 @@ npm run tauri dev
 
 Windows and macOS installers are built with GitHub Actions:
 
-1. Push a version tag such as `v0.5.0`, or run **Actions > Masaustu uygulamalarini derle > Run workflow**.
+1. Push a version tag such as `v0.5.1`, or run **Actions > Masaustu uygulamalarini derle > Run workflow**.
 2. Download `belge-ai-windows-x64` for the Windows 10/11 NSIS installer.
 3. Download `belge-ai-macos-aarch64` for the Apple Silicon macOS DMG.
 
-The application is unsigned, so Windows SmartScreen or macOS Gatekeeper may show a warning.
+The Windows installer is unsigned, so Windows SmartScreen may show a warning. The macOS app uses a valid ad-hoc bundle signature; because it is not Apple-notarized yet, macOS may still require approval from **System Settings > Privacy & Security** on first launch.
 
 ## Local macOS build
 
