@@ -12,8 +12,10 @@ Local-first, privacy-focused PDF document assistant. `belge.ai` extracts PDF tex
 - Page-by-page PDF extraction with PDF.js
 - Local summaries, keyword analysis and document search
 - Answers linked to the original source page
+- Real PDF page preview with a searchable extracted-text view
 - Conversation history with copyable answers
 - Responsive source panel with highlighted search terms
+- Searchable persistent document library
 - Processing progress, clear empty states and practical error messages
 - Drag-and-drop and native file selection
 - No uploads, accounts or API keys required
@@ -54,6 +56,7 @@ The current version is deliberately API-free. It ranks sentences using normalize
 - [x] Page-based PDF extraction
 - [x] Local search with real source pages
 - [x] Persistent local document library
+- [x] Original PDF page preview
 - [ ] Embedding-based semantic search
 - [ ] Optional local LLM through Ollama
 - [ ] Optional OpenAI-powered RAG mode

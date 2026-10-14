@@ -19,10 +19,12 @@ export type StoredDocument = {
   savedAt: number;
   pages: PdfPage[];
   messages: ChatMessage[];
+  data?: ArrayBuffer;
 };
 
 export type StoredDocumentSummary = Pick<StoredDocument, "id" | "name" | "size" | "savedAt"> & {
   pageCount: number;
+  hasOriginal: boolean;
 };
 
 const databaseName = "belge-ai-library";
@@ -58,7 +60,9 @@ export async function listStoredDocuments(): Promise<StoredDocumentSummary[]> {
     );
     return documents
       .sort((a, b) => b.savedAt - a.savedAt)
-      .map(({ id, name, size, savedAt, pages }) => ({ id, name, size, savedAt, pageCount: pages.length }));
+      .map(({ id, name, size, savedAt, pages, data }) => ({
+        id, name, size, savedAt, pageCount: pages.length, hasOriginal: Boolean(data),
+      }));
   } finally {
     database.close();
   }

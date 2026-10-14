@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp, BookOpenText, Check, ChevronLeft, ChevronRight, Clipboard,
-  FilePlus2, FileSearch, FileText, FolderOpen, Highlighter, LoaderCircle,
+  FileImage, FilePlus2, FileSearch, FileText, FolderOpen, Highlighter, LoaderCircle,
   LockKeyhole, MessageSquareText, PanelRightClose, PanelRightOpen,
-  RotateCcw, Search, Sparkles, Trash2, Upload, X,
+  RotateCcw, ScanText, Search, Sparkles, Trash2, Upload, X,
 } from "lucide-react";
 import "./App.css";
+import PdfPreview from "./PdfPreview";
 import {
   deleteStoredDocument, getStoredDocument, listStoredDocuments, saveDocumentMessages,
   saveStoredDocument, type ChatMessage, type PdfPage, type SearchResult,
@@ -58,12 +59,30 @@ function topKeywords(pages: PdfPage[]) {
     .map(([word]) => word.charAt(0).toLocaleUpperCase("tr") + word.slice(1));
 }
 
+function expandedQueryTerms(question: string) {
+  const terms = new Set(tokenize(question));
+  const normalized = question.toLocaleLowerCase("tr");
+  if (/tarih|süre|zaman|ne zaman/.test(normalized)) {
+    ["tarih", "süre", "gün", "hafta", "ay", "yıl", "başla", "bitiş", "geçerli"].forEach((term) => terms.add(term));
+  }
+  if (/yükümlülük|sorumluluk|görev|taahhüt/.test(normalized)) {
+    ["yükümlülük", "sorumluluk", "taahhüt", "zorunlu", "gerekli"].forEach((term) => terms.add(term));
+  }
+  return [...terms];
+}
+
+function wordMatchScore(word: string, term: string) {
+  if (word === term) return 3;
+  if (term.length >= 5 && (word.startsWith(term) || term.startsWith(word))) return 2;
+  return 0;
+}
+
 function searchDocument(question: string, pages: PdfPage[]): SearchResult {
-  const terms = [...new Set(tokenize(question))];
+  const terms = expandedQueryTerms(question);
   const rows = pages.flatMap((page) => sentences(page.text).map((text) => {
     const words = tokenize(text);
     const score = terms.reduce(
-      (total, term) => total + words.filter((word) => word.includes(term) || term.includes(word)).length,
+      (total, term) => total + words.reduce((termScore, word) => termScore + wordMatchScore(word, term), 0),
       0,
     );
     return { page: page.number, text, score };
@@ -87,10 +106,10 @@ function searchDocument(question: string, pages: PdfPage[]): SearchResult {
   };
 }
 
-async function extractPdf(file: File, onProgress: (current: number, total: number) => void) {
+async function extractPdf(data: ArrayBuffer, onProgress: (current: number, total: number) => void) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-  const document = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const document = await pdfjs.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
   const pages: PdfPage[] = [];
   for (let number = 1; number <= document.numPages; number += 1) {
     onProgress(number, document.numPages);
@@ -127,6 +146,14 @@ function recentDate(timestamp: number) {
   return date.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
 }
 
+function matchExcerpt(text: string, query: string) {
+  const position = text.toLocaleLowerCase("tr").indexOf(query.trim().toLocaleLowerCase("tr"));
+  if (position < 0) return text.slice(0, 110);
+  const start = Math.max(0, position - 42);
+  const end = Math.min(text.length, position + query.length + 72);
+  return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+}
+
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -150,6 +177,9 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [recentDocuments, setRecentDocuments] = useState<StoredDocumentSummary[]>([]);
   const [libraryReady, setLibraryReady] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [sourceMode, setSourceMode] = useState<"pdf" | "text">("text");
 
   const hasDocument = pages.length > 0;
   const summary = useMemo(() => (hasDocument ? makeSummary(pages) : ""), [hasDocument, pages]);
@@ -161,6 +191,11 @@ function App() {
     if (!clean) return [];
     return pages.filter((page) => page.text.toLocaleLowerCase("tr").includes(clean)).slice(0, 6);
   }, [documentSearch, pages]);
+  const filteredDocuments = useMemo(() => {
+    const clean = librarySearch.trim().toLocaleLowerCase("tr");
+    if (!clean) return recentDocuments;
+    return recentDocuments.filter((document) => document.name.toLocaleLowerCase("tr").includes(clean));
+  }, [librarySearch, recentDocuments]);
 
   useEffect(() => {
     void refreshLibrary();
@@ -198,17 +233,20 @@ function App() {
     size: number;
     pages: PdfPage[];
     messages: ChatMessage[];
+    data?: ArrayBuffer;
   }) {
     const firstReadable = document.pages.find((page) => page.text.length > 15) ?? document.pages[0];
     setActiveDocumentId(document.id);
     setFileName(document.name);
     setFileSize(document.size);
     setPages(document.pages);
+    setPdfData(document.data ?? null);
     setMessages(document.messages);
     messageId.current = document.messages.reduce((largest, message) => Math.max(largest, message.id), 0);
     setSourcePage(firstReadable?.number ?? 1);
-    setSourceExcerpt(firstReadable?.text.slice(0, 1600) ?? "");
+    setSourceExcerpt(firstReadable?.text ?? "");
     setSourceTerms([]);
+    setSourceMode(document.data ? "pdf" : "text");
     setDocumentSearch("");
     setSourceOpen(false);
     setError("");
@@ -229,13 +267,32 @@ function App() {
   }
 
   async function removeStoredDocument(id: string) {
+    const document = recentDocuments.find((item) => item.id === id);
+    if (!document || !window.confirm(`“${document.name}” yerel kütüphaneden kaldırılsın mı? Bu işlem geri alınamaz.`)) return;
     try {
       await deleteStoredDocument(id);
-      if (id === activeDocumentId) setActiveDocumentId(null);
+      if (id === activeDocumentId) closeDocument();
       await refreshLibrary();
     } catch {
       setError("Belge yerel kütüphaneden silinemedi.");
     }
+  }
+
+  function closeDocument() {
+    setActiveDocumentId(null);
+    setFileName("");
+    setFileSize(0);
+    setPages([]);
+    setPdfData(null);
+    setMessages([]);
+    setQuestion("");
+    setSourcePage(1);
+    setSourceExcerpt("");
+    setSourceTerms([]);
+    setDocumentSearch("");
+    setSourceOpen(false);
+    setStatus("idle");
+    setError("");
   }
 
   async function openPdf(file?: File) {
@@ -258,12 +315,14 @@ function App() {
     setMessages([]);
     setActiveDocumentId(null);
     setPages([]);
+    setPdfData(null);
     setSourceExcerpt("");
     setSourceTerms([]);
     setDocumentSearch("");
     setSourceOpen(false);
     try {
-      const extracted = await extractPdf(file, (current, total) =>
+      const data = await file.arrayBuffer();
+      const extracted = await extractPdf(data, (current, total) =>
         setProcessingLabel(`${current} / ${total}. sayfa okunuyor`),
       );
       const firstReadable = extracted.find((page) => page.text.length > 15);
@@ -271,9 +330,11 @@ function App() {
         throw new Error("Bu PDF’de seçilebilir metin bulunamadı. Belge taranmışsa önce OCR uygulanmış bir kopya kullanabilirsin.");
       }
       setPages(extracted);
+      setPdfData(data);
       setSourcePage(firstReadable.number);
-      setSourceExcerpt(firstReadable.text.slice(0, 1600));
+      setSourceExcerpt(firstReadable.text);
       setSourceTerms([]);
+      setSourceMode("pdf");
       setStatus("ready");
       setProcessingLabel("");
       const documentId = `${file.name}:${file.size}:${file.lastModified}`;
@@ -285,6 +346,7 @@ function App() {
         savedAt: Date.now(),
         pages: extracted,
         messages: previousDocument?.messages ?? [],
+        data,
       };
       try {
         await saveStoredDocument(document);
@@ -297,6 +359,7 @@ function App() {
       }
     } catch (caught) {
       setPages([]);
+      setPdfData(null);
       setError(caught instanceof Error ? caught.message : "PDF işlenirken beklenmeyen bir hata oluştu.");
       setStatus("error");
       setProcessingLabel("");
@@ -329,23 +392,28 @@ function App() {
     setIsAnswering(false);
   }
 
-  function showSource(pageNumber: number, excerpt?: string, terms: string[] = []) {
+  function showSource(pageNumber: number, terms: string[] = [], preferredMode?: "pdf" | "text") {
     const page = pages.find((item) => item.number === pageNumber);
     if (!page) return;
     setSourcePage(pageNumber);
-    setSourceExcerpt(excerpt || page.text.slice(0, 1600));
+    setSourceExcerpt(page.text);
     setSourceTerms(terms);
+    setSourceMode(preferredMode ?? (terms.length ? "text" : pdfData ? "pdf" : "text"));
     setSourceOpen(true);
   }
 
   function changePage(next: number) {
-    showSource(next, undefined, documentSearch ? tokenize(documentSearch) : []);
+    showSource(next, documentSearch ? tokenize(documentSearch) : [], sourceMode);
   }
 
   async function copyAnswer(message: ChatMessage) {
+    await copyText(message.answer, message.id);
+  }
+
+  async function copyText(text: string, id: number) {
     try {
-      await navigator.clipboard.writeText(message.answer);
-      setCopiedId(message.id);
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
       window.setTimeout(() => setCopiedId(null), 1500);
     } catch {
       setError("Yanıt panoya kopyalanamadı.");
@@ -376,20 +444,22 @@ function App() {
 
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><BookOpenText size={18} /></span><div><strong>belge.ai</strong><small>Yerel belge asistanı</small></div></div>
-        <button className="primary-button" onClick={() => inputRef.current?.click()}><FilePlus2 size={17} /> PDF aç <kbd>⌘O</kbd></button>
+        <button className="primary-button" onClick={() => inputRef.current?.click()}><FilePlus2 size={17} /> PDF aç <kbd>Ctrl/⌘ O</kbd></button>
 
         <div className={`search-wrap ${documentSearch ? "active" : ""}`}>
           <label className="search"><Search size={15} /><input value={documentSearch} onChange={(event) => setDocumentSearch(event.target.value)} placeholder={hasDocument ? "Belgede ara" : "Önce bir PDF aç"} disabled={!hasDocument} />{documentSearch && <button onClick={() => setDocumentSearch("")} aria-label="Aramayı temizle"><X size={13} /></button>}</label>
-          {documentSearch && <div className="search-results"><small>{searchMatches.length ? `${searchMatches.length} sayfa bulundu` : "Eşleşme bulunamadı"}</small>{searchMatches.map((page) => <button key={page.number} onClick={() => showSource(page.number, undefined, tokenize(documentSearch))}><span>Sayfa {page.number}</span><p>{page.text.slice(0, 90)}…</p></button>)}</div>}
+          {documentSearch && <div className="search-results"><small>{searchMatches.length ? `${searchMatches.length} sayfa bulundu` : "Eşleşme bulunamadı"}</small>{searchMatches.map((page) => <button key={page.number} onClick={() => showSource(page.number, tokenize(documentSearch), "text")}><span>Sayfa {page.number}</span><p>{matchExcerpt(page.text, documentSearch)}</p></button>)}</div>}
         </div>
 
         <div className="section-label">AÇIK BELGE</div>
-        {hasDocument || status === "processing" ? <button className="document-item active" onClick={() => setSourceOpen(true)}><FileText size={16} /><span><strong>{fileName.replace(/\.pdf$/i, "")}</strong><small>{status === "processing" ? processingLabel : `${pages.length} sayfa · ${(fileSize / 1024 / 1024).toFixed(1)} MB`}</small></span></button> : <div className="no-document"><FileSearch size={18} /><span>Henüz belge açılmadı</span></div>}
+        {hasDocument || status === "processing" ? <button className="document-item active" onClick={() => { setSourceMode(pdfData ? "pdf" : "text"); setSourceOpen(true); }}><FileText size={16} /><span><strong>{fileName.replace(/\.pdf$/i, "")}</strong><small>{status === "processing" ? processingLabel : `${pages.length} sayfa · ${(fileSize / 1024 / 1024).toFixed(1)} MB`}</small></span></button> : <div className="no-document"><FileSearch size={18} /><span>Henüz belge açılmadı</span></div>}
         <div className="section-label library-label"><span>SON BELGELER</span>{recentDocuments.length > 0 && <small>{recentDocuments.length}</small>}</div>
+        {recentDocuments.length > 3 && <label className="library-search"><Search size={13} /><input value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="Kütüphanede ara" />{librarySearch && <button onClick={() => setLibrarySearch("")} aria-label="Kütüphane aramasını temizle"><X size={12} /></button>}</label>}
         <div className="recent-list">
           {!libraryReady && <div className="no-document"><LoaderCircle size={16} className="spinner" /><span>Kütüphane yükleniyor</span></div>}
           {libraryReady && recentDocuments.length === 0 && <div className="no-document compact"><FileText size={16} /><span>Açtığın belgeler burada görünür</span></div>}
-          {recentDocuments.slice(0, 6).map((document) => <div className={`recent-row ${document.id === activeDocumentId ? "active" : ""}`} key={document.id}>
+          {libraryReady && recentDocuments.length > 0 && filteredDocuments.length === 0 && <div className="no-document compact"><Search size={16} /><span>Bu adla bir belge bulunamadı</span></div>}
+          {filteredDocuments.map((document) => <div className={`recent-row ${document.id === activeDocumentId ? "active" : ""}`} key={document.id}>
             <button className="recent-document" onClick={() => void openStoredDocument(document.id)} disabled={status === "processing"}>
               <FileText size={15} />
               <span><strong>{document.name.replace(/\.pdf$/i, "")}</strong><small>{document.pageCount} sayfa · {recentDate(document.savedAt)}</small></span>
@@ -406,6 +476,7 @@ function App() {
           <div className="header-actions">
             {messages.length > 0 && <button className="icon-button" onClick={clearConversation} title="Sohbeti temizle"><RotateCcw size={15} /></button>}
             {hasDocument && <button className="panel-toggle" onClick={() => setSourceOpen((open) => !open)}>{sourceOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />} Kaynak</button>}
+            {hasDocument && <button className="icon-button" onClick={closeDocument} title="Belgeyi kapat"><X size={15} /></button>}
             <span className={`status ${status}`}>{status === "processing" && <LoaderCircle size={12} className="spinner" />}{status !== "processing" && <i />}{status === "processing" ? processingLabel : status === "error" ? "Belge açılamadı" : status === "ready" ? "Analiz hazır" : "Belge bekleniyor"}</span>
           </div>
         </header>
@@ -417,10 +488,10 @@ function App() {
           {status === "processing" && <section className="processing-card"><div className="processing-orbit"><LoaderCircle size={25} className="spinner" /></div><div><h2>Belge hazırlanıyor</h2><p>{processingLabel}</p></div></section>}
 
           {hasDocument && <>
-            <section className="summary-card"><div className="summary-heading"><span className="response-icon violet"><Sparkles size={17} /></span><div><small>OTOMATİK ÖZET</small><h2>Belgenin kısa özeti</h2></div></div><p>{summary}</p><div className="tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div></section>
+            <section className="summary-card"><div className="summary-heading"><span className="response-icon violet"><Sparkles size={17} /></span><div><small>OTOMATİK ÖZET</small><h2>Belgenin kısa özeti</h2></div><button className="summary-copy" onClick={() => void copyText(summary, 0)} title="Özeti kopyala">{copiedId === 0 ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{summary}</p><div className="tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div></section>
             {messages.length === 0 && <section className="suggestions"><small>HIZLI BAŞLANGIÇ</small><h3>Bu belgeye ne sormak istersin?</h3><div>{suggestionItems.map((item) => <button key={item} onClick={() => void ask(item)}>{item}<ArrowUp size={13} /></button>)}</div></section>}
             <div className="message-list">
-              {messages.map((message) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>Belge yanıtı</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p><button className="source-chip" onClick={() => showSource(message.page, message.excerpt, message.terms)}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı aç</button></div></div></article>)}
+              {messages.map((message) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>Belgeden bulunan yanıt</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p><button className="source-chip" onClick={() => showSource(message.page, message.terms, "text")}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı aç</button></div></div></article>)}
               {isAnswering && <div className="assistant-message thinking"><span className="response-icon"><LoaderCircle size={17} className="spinner" /></span><div><h2>Belgede aranıyor</h2><span><i /><i /><i /></span></div></div>}
             </div>
             <div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} placeholder="Bu belge hakkında bir şey sor…" rows={2} disabled={isAnswering} /><div><span>Enter ile gönder · Shift + Enter ile yeni satır</span><button aria-label="Soruyu gönder" disabled={!question.trim() || status !== "ready" || isAnswering} onClick={() => void ask()}><ArrowUp size={17} /></button></div></div>
@@ -430,8 +501,12 @@ function App() {
 
       {sourceOpen && <button className="panel-backdrop" aria-label="Kaynak panelini kapat" onClick={() => setSourceOpen(false)} />}
       <aside className={`source-panel ${sourceOpen ? "open" : ""}`}>
-        <div className="source-title"><div><span>Kaynak belge</span><small>Sayfa metni · yalnızca yerel</small></div><div className="source-actions"><button onClick={() => inputRef.current?.click()}><FolderOpen size={15} /> Değiştir</button><button className="close-source" onClick={() => setSourceOpen(false)} aria-label="Kaynak panelini kapat"><X size={15} /></button></div></div>
-        {hasDocument ? <article className="paper"><header><strong>{fileName.toUpperCase()}</strong><span>{String(sourcePage).padStart(2, "0")}</span></header><p>{sourceExcerpt ? highlightedText(sourceExcerpt, sourceTerms) : "Bu sayfada seçilebilir metin bulunamadı."}</p><footer><button disabled={sourcePage <= 1} onClick={() => changePage(sourcePage - 1)} aria-label="Önceki sayfa"><ChevronLeft size={16} /></button><span>Sayfa {sourcePage} / {pages.length}</span><button disabled={sourcePage >= pages.length} onClick={() => changePage(sourcePage + 1)} aria-label="Sonraki sayfa"><ChevronRight size={16} /></button></footer></article> : <div className="source-empty"><FileText size={24} /><p>Kaynak metni görmek için bir PDF aç.</p></div>}
+        <div className="source-title"><div><span>Kaynak belge</span><small>Gerçek sayfa ve çıkarılmış metin</small></div><div className="source-actions"><button onClick={() => inputRef.current?.click()}><FolderOpen size={15} /> Değiştir</button><button className="close-source" onClick={() => setSourceOpen(false)} aria-label="Kaynak panelini kapat"><X size={15} /></button></div></div>
+        {hasDocument && <div className="source-tabs" role="tablist" aria-label="Kaynak görünümü">
+          <button className={sourceMode === "pdf" ? "active" : ""} onClick={() => setSourceMode("pdf")} disabled={!pdfData} role="tab" aria-selected={sourceMode === "pdf"}><FileImage size={13} /> PDF</button>
+          <button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")} role="tab" aria-selected={sourceMode === "text"}><ScanText size={13} /> Metin</button>
+        </div>}
+        {hasDocument ? <article className={`paper ${sourceMode === "pdf" ? "pdf-mode" : ""}`}><header><strong>{fileName.toUpperCase()}</strong><span>{String(sourcePage).padStart(2, "0")}</span></header>{sourceMode === "pdf" && pdfData ? <PdfPreview data={pdfData} pageNumber={sourcePage} /> : <p>{sourceExcerpt ? highlightedText(sourceExcerpt, sourceTerms) : "Bu sayfada seçilebilir metin bulunamadı."}</p>}<footer><button disabled={sourcePage <= 1} onClick={() => changePage(sourcePage - 1)} aria-label="Önceki sayfa"><ChevronLeft size={16} /></button><span>Sayfa {sourcePage} / {pages.length}</span><button disabled={sourcePage >= pages.length} onClick={() => changePage(sourcePage + 1)} aria-label="Sonraki sayfa"><ChevronRight size={16} /></button></footer></article> : <div className="source-empty"><FileText size={24} /><p>Kaynak belgeyi görmek için bir PDF aç.</p></div>}
         <p className="local-note"><LockKeyhole size={13} /> İçerik yalnızca bu cihazdaki yerel kütüphanede saklanır.</p>
       </aside>
 
