@@ -83,5 +83,16 @@ jobs:
       - name: macOS imzasini ve disk imajini dogrula
         shell: bash
         run: |
-          codesign --verify --deep --strict --verbose=2 desktop/src-tauri/target/release/bundle/macos/BelgeAI.app
-          hdiutil verify desktop/src-tauri/target/release/bundle/dmg/BelgeAI_*.dmg
+          dmg_path=$(find desktop/src-tauri/target/release/bundle/dmg -maxdepth 1 -name 'BelgeAI_*.dmg' -print -quit)
+          test -n "$dmg_path"
+          hdiutil verify "$dmg_path"
+
+          mount_dir=$(mktemp -d)
+          cleanup() {
+            hdiutil detach "$mount_dir" || true
+            rmdir "$mount_dir" || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg_path"
+          codesign --verify --deep --strict --verbose=2 "$mount_dir/BelgeAI.app"
