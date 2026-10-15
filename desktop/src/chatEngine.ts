@@ -82,6 +82,7 @@ export function suggestedQuestions(pages: PdfPage[]) {
 function intentFor(question: string, isCv: boolean) {
   const text = normalize(question);
   const has = (key: keyof typeof concepts) => concepts[key].some((word) => text.includes(normalize(word)));
+  if (isCv && isOverviewQuestion(text)) return "summary";
   if (isCv && (/\b(kime ait|whose|who is|ad[ıi] ne|ismi ne)\b/.test(text) || (has("identity") && /\b(cv|ozgecmis|resume)\b/.test(text)))) return "identity";
   if (isCv && has("contact")) return "contact";
   if (isCv && has("experience")) return "experience";
@@ -89,6 +90,13 @@ function intentFor(question: string, isCv: boolean) {
   if (isCv && has("skills")) return "skills";
   if (isCv && (has("summary") || /\b(cv|ozgecmis|resume)\b/.test(text))) return "summary";
   return "generic";
+}
+
+function isOverviewQuestion(value: string) {
+  const text = normalize(value);
+  return /^(bu )?(belge|pdf|dosya)?\s*(tam olarak )?(nedir|ne|ne belgesi)$/.test(text) ||
+    /\b(what is this|what kind of document|describe this document)\b/.test(text) ||
+    /\b(ana fikir|onemli bilgi|nelerden bahsed|neden bahsed|ne anlatiyor|ne anlatir|genel bakis|main idea|key points|overview)\b/.test(text);
 }
 
 function isHeading(line: string) {
@@ -238,6 +246,18 @@ function matchScore(text: string, terms: string[]) {
   }, 0), 0);
 }
 
+function compactRepeatedSentences(value: string) {
+  return value.split(/(?<=[.!?])\s+/).reduce<string[]>((sentences, sentence) => {
+    const current = normalize(sentence);
+    if (!current || sentences.some((item) => {
+      const existing = normalize(item);
+      return existing.includes(current) || current.includes(existing);
+    })) return sentences;
+    sentences.push(sentence.trim());
+    return sentences;
+  }, []).join(" ");
+}
+
 function extractiveAnswer(question: string, pages: PdfPage[]): SearchResult {
   const terms = queryTerms(question);
   const ranked = chunks(pages).map((row) => ({ ...row, score: matchScore(row.text, terms) }))
@@ -268,14 +288,24 @@ function summaryAnswer(question: string, pages: PdfPage[]): SearchResult {
   for (const word of normalize(pages.map((page) => page.text).join(" ")).split(/\s+/)) {
     if (word.length > 3 && !stopWords.has(word)) frequency.set(word, (frequency.get(word) ?? 0) + 1);
   }
-  const selected = rows.map((row, order) => ({
+  const ranked = rows.map((row, order) => ({
     ...row,
     order,
     score: normalize(row.text).split(/\s+/).reduce((sum, word) => sum + (frequency.get(word) ?? 0), 0) /
       Math.max(8, normalize(row.text).split(/\s+/).length),
-  })).sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.order - b.order);
+  })).sort((a, b) => b.score - a.score);
+  const selected = ranked.reduce<typeof ranked>((chosen, row) => {
+    if (chosen.length >= 3) return chosen;
+    const current = normalize(row.text);
+    const overlaps = chosen.some((item) => {
+      const existing = normalize(item.text);
+      return existing.includes(current) || current.includes(existing);
+    });
+    if (!overlaps) chosen.push(row);
+    return chosen;
+  }, []).sort((a, b) => a.order - b.order);
   const first = selected[0] ?? rows[0];
-  const answer = selected.map((row) => row.text).join(" ");
+  const answer = compactRepeatedSentences(selected.map((row) => row.text).join(" "));
   if (!first || !answer) return extractiveAnswer(question, pages);
   return {
     answer,
@@ -293,7 +323,7 @@ export function answerQuestion(question: string, pages: PdfPage[]): SearchResult
   }
   const normalizedQuestion = normalize(question);
   if (concepts.summary.some((term) => normalizedQuestion.includes(normalize(term))) ||
-      /\b(ana fikir|onemli bilgi|nelerden bahsed|main idea|key points)\b/.test(normalizedQuestion)) {
+      isOverviewQuestion(normalizedQuestion)) {
     return summaryAnswer(question, pages);
   }
   return extractiveAnswer(question, pages);

@@ -23,8 +23,23 @@ try {
   assert.match(answerQuestion("Eğitimi nedir?", pages).answer, /University of London/);
   assert.match(answerQuestion("Hangi becerileri var?", pages).answer, /Python.*SQL.*Power BI/);
   assert.match(answerQuestion("İletişim bilgileri ne?", pages).answer, /jane\.doe@example\.com/);
+  assert.match(answerQuestion("Bu nedir?", pages).answer, /özgeçmiş/i);
+  assert.match(answerQuestion("Bu belge ne belgesi?", pages).answer, /özgeçmiş/i);
+  const genericPages = [{
+    number: 1,
+    text: "HİZMET SÖZLEŞMESİ\nAmaç: Bu sözleşme yerel belge analizi hizmetinin kapsamını düzenler.\nAmaç: Bu sözleşme yerel belge analizi hizmetinin kapsamını düzenler.\nYükümlülükler: Belgeler cihazın dışına çıkarılmaz.",
+    lines: [
+      "HİZMET SÖZLEŞMESİ",
+      "Amaç: Bu sözleşme yerel belge analizi hizmetinin kapsamını düzenler.",
+      "Amaç: Bu sözleşme yerel belge analizi hizmetinin kapsamını düzenler.",
+      "Yükümlülükler: Belgeler cihazın dışına çıkarılmaz.",
+    ],
+    headings: ["HİZMET SÖZLEŞMESİ"],
+  }];
+  const genericAnswer = answerQuestion("Bu belge ne anlatıyor?", genericPages).answer;
+  assert.equal((genericAnswer.match(/yerel belge analizi/g) ?? []).length, 1);
   assert.deepEqual(suggestedQuestions(pages), ["Bu CV kime ait?", "Adayın deneyimleri neler?", "Hangi becerilere sahip?"]);
-  console.log("Chat engine: 7/7 checks passed");
+  console.log("Chat engine: 10/10 checks passed");
 } finally {
   await server.close();
 }

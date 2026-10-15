@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUp, BookOpenText, Check, ChevronLeft, ChevronRight, Clipboard,
+  ArrowUp, BookOpenText, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clipboard,
   FileImage, FilePlus2, FileSearch, FileText, FolderOpen, Highlighter, LoaderCircle,
   LockKeyhole, MessageSquareText, PanelRightClose, PanelRightOpen,
   RotateCcw, ScanText, Search, Sparkles, Trash2, Upload, X,
@@ -69,10 +69,10 @@ async function extractPdf(data: ArrayBuffer, onProgress: (current: number, total
     onProgress(number, document.numPages);
     const page = await document.getPage(number);
     const content = await page.getTextContent();
-    const items = content.items.filter((item): item is typeof item & { str: string; transform: number[]; height: number } =>
+    const items = content.items.filter((item): item is typeof item & { str: string; transform: number[]; height: number; width: number } =>
       "str" in item && Boolean(item.str.trim()) && "transform" in item,
     );
-    const grouped: Array<{ y: number; height: number; parts: Array<{ x: number; text: string }> }> = [];
+    const grouped: Array<{ y: number; height: number; parts: Array<{ x: number; width: number; text: string }> }> = [];
     for (const item of items) {
       const x = item.transform[4] ?? 0;
       const y = item.transform[5] ?? 0;
@@ -82,13 +82,20 @@ async function extractPdf(data: ArrayBuffer, onProgress: (current: number, total
         grouped.push(row);
       }
       row.height = Math.max(row.height, item.height || Math.abs(item.transform[3] ?? 0));
-      row.parts.push({ x, text: item.str.trim() });
+      row.parts.push({ x, width: Math.max(0, item.width ?? 0), text: item.str.trim() });
     }
     grouped.sort((a, b) => b.y - a.y);
-    const rows = grouped.map((row) => ({
-      ...row,
-      text: row.parts.sort((a, b) => a.x - b.x).map((part) => part.text).join(" ").replace(/\s+/g, " ").trim(),
-    })).filter((row) => row.text);
+    const rows = grouped.map((row) => {
+      const parts = row.parts.sort((a, b) => a.x - b.x);
+      const text = parts.reduce((line, part, index) => {
+        if (index === 0) return part.text;
+        const previous = parts[index - 1];
+        const gap = part.x - (previous.x + previous.width);
+        const shouldSeparate = gap > Math.max(1.5, row.height * 0.14);
+        return `${line}${shouldSeparate ? " " : ""}${part.text}`;
+      }, "").replace(/\s+/g, " ").trim();
+      return { ...row, text };
+    }).filter((row) => row.text);
     const bodyHeights = rows.map((row) => row.height).filter((height) => height > 0).sort((a, b) => a - b);
     const medianHeight = bodyHeights[Math.floor(bodyHeights.length / 2)] ?? 0;
     const lines = rows.map((row) => row.text);
@@ -134,6 +141,7 @@ function matchExcerpt(text: string, query: string) {
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
   const messageId = useRef(0);
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState(0);
@@ -157,6 +165,7 @@ function App() {
   const [librarySearch, setLibrarySearch] = useState("");
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [sourceMode, setSourceMode] = useState<"pdf" | "text">("text");
+  const [summaryExpanded, setSummaryExpanded] = useState(true);
 
   const hasDocument = pages.length > 0;
   const summary = useMemo(() => (hasDocument ? makeSummary(pages) : ""), [hasDocument, pages]);
@@ -171,9 +180,11 @@ function App() {
   }, [documentSearch, pages]);
   const filteredDocuments = useMemo(() => {
     const clean = librarySearch.trim().toLocaleLowerCase("tr");
-    if (!clean) return recentDocuments;
-    return recentDocuments.filter((document) => document.name.toLocaleLowerCase("tr").includes(clean));
-  }, [librarySearch, recentDocuments]);
+    return recentDocuments.filter((document) =>
+      document.id !== activeDocumentId && (!clean || document.name.toLocaleLowerCase("tr").includes(clean)),
+    );
+  }, [activeDocumentId, librarySearch, recentDocuments]);
+  const otherDocumentCount = recentDocuments.filter((document) => document.id !== activeDocumentId).length;
 
   useEffect(() => {
     void refreshLibrary();
@@ -192,7 +203,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: "smooth" });
+    const frame = window.requestAnimationFrame(() => {
+      conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [messages, isAnswering]);
 
   async function refreshLibrary() {
@@ -225,6 +239,7 @@ function App() {
     setSourceExcerpt(firstReadable?.text ?? "");
     setSourceTerms([]);
     setSourceMode(document.data ? "pdf" : "text");
+    setSummaryExpanded(true);
     setDocumentSearch("");
     setSourceOpen(false);
     setError("");
@@ -271,6 +286,7 @@ function App() {
     setSourceOpen(false);
     setStatus("idle");
     setError("");
+    setSummaryExpanded(true);
   }
 
   async function openPdf(file?: File) {
@@ -313,6 +329,7 @@ function App() {
       setSourceExcerpt(firstReadable.text);
       setSourceTerms([]);
       setSourceMode("pdf");
+      setSummaryExpanded(true);
       setStatus("ready");
       setProcessingLabel("");
       const documentId = `${file.name}:${file.size}:${file.lastModified}`;
@@ -399,6 +416,7 @@ function App() {
   }
 
   function clearConversation() {
+    if (messages.length > 0 && !window.confirm("Bu belgeyle yaptığın sohbet temizlensin mi? Belge kütüphanede kalacak.")) return;
     setMessages([]);
     if (activeDocumentId) {
       void saveDocumentMessages(activeDocumentId, []).then(refreshLibrary).catch(() => {
@@ -416,7 +434,7 @@ function App() {
 
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><BookOpenText size={18} /></span><div><strong>belge.ai</strong><small>Yerel belge asistanı</small></div></div>
-        <button className="primary-button" onClick={() => inputRef.current?.click()}><FilePlus2 size={17} /> PDF aç <kbd>Ctrl/⌘ O</kbd></button>
+        <button className="primary-button" onClick={() => inputRef.current?.click()}><FilePlus2 size={17} /> Yeni PDF aç <kbd>Ctrl/⌘ O</kbd></button>
 
         <div className={`search-wrap ${documentSearch ? "active" : ""}`}>
           <label className="search"><Search size={15} /><input value={documentSearch} onChange={(event) => setDocumentSearch(event.target.value)} placeholder={hasDocument ? "Belgede ara" : "Önce bir PDF aç"} disabled={!hasDocument} />{documentSearch && <button onClick={() => setDocumentSearch("")} aria-label="Aramayı temizle"><X size={13} /></button>}</label>
@@ -424,14 +442,14 @@ function App() {
         </div>
 
         <div className="section-label">AÇIK BELGE</div>
-        {hasDocument || status === "processing" ? <button className="document-item active" onClick={() => { setSourceMode(pdfData ? "pdf" : "text"); setSourceOpen(true); }}><FileText size={16} /><span><strong>{fileName.replace(/\.pdf$/i, "")}</strong><small>{status === "processing" ? processingLabel : `${pages.length} sayfa · ${(fileSize / 1024 / 1024).toFixed(1)} MB`}</small></span></button> : <div className="no-document"><FileSearch size={18} /><span>Henüz belge açılmadı</span></div>}
-        <div className="section-label library-label"><span>SON BELGELER</span>{recentDocuments.length > 0 && <small>{recentDocuments.length}</small>}</div>
-        {recentDocuments.length > 3 && <label className="library-search"><Search size={13} /><input value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="Kütüphanede ara" />{librarySearch && <button onClick={() => setLibrarySearch("")} aria-label="Kütüphane aramasını temizle"><X size={12} /></button>}</label>}
+        {hasDocument || status === "processing" ? <button className="document-item active" onClick={() => { setSourceMode(pdfData ? "pdf" : "text"); setSourceOpen(true); }} title="Açık belgenin sayfalarını görüntüle"><FileText size={16} /><span><strong>{fileName.replace(/\.pdf$/i, "")}</strong><small>{status === "processing" ? processingLabel : `${pages.length} sayfa · ${(fileSize / 1024 / 1024).toFixed(1)} MB`}</small></span><em><PanelRightOpen size={12} /> Görüntüle</em></button> : <div className="no-document"><FileSearch size={18} /><span>Henüz belge açılmadı</span></div>}
+        <div className="section-label library-label"><span>DİĞER BELGELER</span>{otherDocumentCount > 0 && <small>{otherDocumentCount}</small>}</div>
+        {otherDocumentCount > 3 && <label className="library-search"><Search size={13} /><input value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="Kütüphanede ara" />{librarySearch && <button onClick={() => setLibrarySearch("")} aria-label="Kütüphane aramasını temizle"><X size={12} /></button>}</label>}
         <div className="recent-list">
           {!libraryReady && <div className="no-document"><LoaderCircle size={16} className="spinner" /><span>Kütüphane yükleniyor</span></div>}
-          {libraryReady && recentDocuments.length === 0 && <div className="no-document compact"><FileText size={16} /><span>Açtığın belgeler burada görünür</span></div>}
-          {libraryReady && recentDocuments.length > 0 && filteredDocuments.length === 0 && <div className="no-document compact"><Search size={16} /><span>Bu adla bir belge bulunamadı</span></div>}
-          {filteredDocuments.map((document) => <div className={`recent-row ${document.id === activeDocumentId ? "active" : ""}`} key={document.id}>
+          {libraryReady && otherDocumentCount === 0 && <div className="no-document compact"><FileText size={16} /><span>Diğer belgelerin burada görünür</span></div>}
+          {libraryReady && otherDocumentCount > 0 && filteredDocuments.length === 0 && <div className="no-document compact"><Search size={16} /><span>Bu adla bir belge bulunamadı</span></div>}
+          {filteredDocuments.map((document) => <div className="recent-row" key={document.id}>
             <button className="recent-document" onClick={() => void openStoredDocument(document.id)} disabled={status === "processing"}>
               <FileText size={15} />
               <span><strong>{document.name.replace(/\.pdf$/i, "")}</strong><small>{document.pageCount} sayfa · {recentDate(document.savedAt)}</small></span>
@@ -446,34 +464,38 @@ function App() {
         <header className="document-header">
           <div className="header-copy"><h1>{hasDocument || status === "processing" ? fileName : "Yeni çalışma"}</h1><p>{hasDocument ? `${pages.length} sayfa · ${wordCount.toLocaleString("tr-TR")} kelime · ~${readingMinutes} dk okuma` : "PDF’lerini güvenle incele ve içeriğe dayalı yanıtlar al"}</p></div>
           <div className="header-actions">
-            {messages.length > 0 && <button className="icon-button" onClick={clearConversation} title="Sohbeti temizle"><RotateCcw size={15} /></button>}
-            {hasDocument && <button className="panel-toggle" onClick={() => setSourceOpen((open) => !open)}>{sourceOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />} Kaynak</button>}
-            {hasDocument && <button className="icon-button" onClick={closeDocument} title="Belgeyi kapat"><X size={15} /></button>}
+            {messages.length > 0 && <button className="header-button chat-action" onClick={clearConversation} title="Yalnızca bu belgenin sohbet geçmişini temizler"><RotateCcw size={14} /><span>Sohbeti temizle</span></button>}
+            {hasDocument && <span className="action-divider" />}
+            {hasDocument && <button className={`header-button ${sourceOpen ? "active" : ""}`} onClick={() => setSourceOpen((open) => !open)} title="Belgenin PDF ve metin görünümünü açar">{sourceOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}<span>{sourceOpen ? "Belgeyi gizle" : "Belgeyi görüntüle"}</span></button>}
+            {hasDocument && <button className="header-button close-document" onClick={closeDocument} title="Belgeyi kapatır; kütüphaneden silmez"><X size={14} /><span>Belgeyi kapat</span></button>}
             <span className={`status ${status}`}>{status === "processing" && <LoaderCircle size={12} className="spinner" />}{status !== "processing" && <i />}{status === "processing" ? processingLabel : status === "error" ? "Belge açılamadı" : status === "ready" ? "Analiz hazır" : "Belge bekleniyor"}</span>
           </div>
         </header>
 
-        <div className="conversation" ref={conversationRef}>
-          {error && <div className="error-banner" role="alert"><div><strong>Bir sorun oluştu</strong><span>{error}</span></div><button onClick={() => { setError(""); setStatus(hasDocument ? "ready" : "idle"); }} aria-label="Hatayı kapat"><X size={15} /></button></div>}
+        <div className="conversation-shell">
+          <div className="conversation" ref={conversationRef}>
+            {error && <div className="error-banner" role="alert"><div><strong>Bir sorun oluştu</strong><span>{error}</span></div><button onClick={() => { setError(""); setStatus(hasDocument ? "ready" : "idle"); }} aria-label="Hatayı kapat"><X size={15} /></button></div>}
 
-          {!hasDocument && status !== "processing" && <section className="empty-state"><div className="empty-visual"><BookOpenText size={30} /></div><span className="eyebrow">YEREL PDF ASİSTANI</span><h2>Belgeni aç, aradığın bilgiyi saniyeler içinde bul.</h2><p>Özet çıkar, sorular sor ve her yanıtın dayandığı sayfayı anında görüntüle.</p><button onClick={() => inputRef.current?.click()}><FolderOpen size={17} /> PDF seç</button><small>PDF · En fazla 50 MB · İnternet bağlantısı gerekmez</small></section>}
-          {status === "processing" && <section className="processing-card"><div className="processing-orbit"><LoaderCircle size={25} className="spinner" /></div><div><h2>Belge hazırlanıyor</h2><p>{processingLabel}</p></div></section>}
+            {!hasDocument && status !== "processing" && <section className="empty-state"><div className="empty-visual"><BookOpenText size={30} /></div><span className="eyebrow">YEREL PDF ASİSTANI</span><h2>Belgeni aç, aradığın bilgiyi saniyeler içinde bul.</h2><p>Özet çıkar, sorular sor ve her yanıtın dayandığı sayfayı anında görüntüle.</p><button onClick={() => inputRef.current?.click()}><FolderOpen size={17} /> PDF seç</button><small>PDF · En fazla 50 MB · İnternet bağlantısı gerekmez</small></section>}
+            {status === "processing" && <section className="processing-card"><div className="processing-orbit"><LoaderCircle size={25} className="spinner" /></div><div><h2>Belge hazırlanıyor</h2><p>{processingLabel}</p></div></section>}
 
-          {hasDocument && <>
-            <section className="summary-card"><div className="summary-heading"><span className="response-icon violet"><Sparkles size={17} /></span><div><small>OTOMATİK ÖZET</small><h2>Belgenin kısa özeti</h2></div><button className="summary-copy" onClick={() => void copyText(summary, 0)} title="Özeti kopyala">{copiedId === 0 ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{summary}</p><div className="tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div></section>
-            {messages.length === 0 && <section className="suggestions"><small>HIZLI BAŞLANGIÇ</small><h3>Bu belgeye ne sormak istersin?</h3><div>{suggestionItems.map((item) => <button key={item} onClick={() => void ask(item)}>{item}<ArrowUp size={13} /></button>)}</div></section>}
-            <div className="message-list">
-              {messages.map((message) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>{message.kind === "direct" ? "Akıllı belge yanıtı" : message.kind === "not-found" ? "Belgede bulunamadı" : "Belgeden bulunan yanıt"}</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p>{message.kind !== "not-found" && <button className="source-chip" onClick={() => showSource(message.page, message.terms, "text")}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı aç</button>}</div></div></article>)}
-              {isAnswering && <div className="assistant-message thinking"><span className="response-icon"><LoaderCircle size={17} className="spinner" /></span><div><h2>Belgede aranıyor</h2><span><i /><i /><i /></span></div></div>}
-            </div>
-            <div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} placeholder="Bu belge hakkında bir şey sor…" rows={2} disabled={isAnswering} /><div><span>Enter ile gönder · Shift + Enter ile yeni satır</span><button aria-label="Soruyu gönder" disabled={!question.trim() || status !== "ready" || isAnswering} onClick={() => void ask()}><ArrowUp size={17} /></button></div></div>
-          </>}
+            {hasDocument && <>
+              <section className={`summary-card ${summaryExpanded ? "" : "collapsed"}`}><div className="summary-heading"><span className="response-icon violet"><Sparkles size={17} /></span><div><small>OTOMATİK ÖZET</small><h2>Belgenin kısa özeti</h2></div><div className="summary-actions"><button onClick={() => setSummaryExpanded((expanded) => !expanded)} title={summaryExpanded ? "Özeti daralt" : "Özeti göster"}>{summaryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button><button onClick={() => void copyText(summary, 0)} title="Özeti kopyala">{copiedId === 0 ? <Check size={14} /> : <Clipboard size={14} />}</button></div></div>{summaryExpanded && <><p>{summary}</p><div className="tags">{tags.map((tag) => <span key={tag}>{tag}</span>)}</div></>}</section>
+              {messages.length === 0 && <section className="suggestions"><small>HIZLI BAŞLANGIÇ</small><h3>Bu belgeye ne sormak istersin?</h3><div>{suggestionItems.map((item) => <button key={item} onClick={() => void ask(item)}>{item}<ArrowUp size={13} /></button>)}</div></section>}
+              <div className="message-list">
+                {messages.map((message, index) => <article className="message-pair" key={message.id}><div className="user-message"><span>{message.question}</span></div><div className="assistant-message"><span className="response-icon"><MessageSquareText size={17} /></span><div className="answer-copy"><div className="answer-heading"><h2>{message.kind === "direct" ? "Akıllı belge yanıtı" : message.kind === "not-found" ? "Belgede bulunamadı" : "Belgeden bulunan yanıt"}</h2><button onClick={() => void copyAnswer(message)} title="Yanıtı kopyala">{copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}</button></div><p>{message.answer}</p>{message.kind !== "not-found" && <button className="source-chip" onClick={() => showSource(message.page, message.terms, "text")}><Highlighter size={14} /> Sayfa {message.page} · Kaynağı görüntüle</button>}{index === messages.length - 1 && !isAnswering && <div className="follow-up"><span>Devam etmek için</span><div>{suggestionItems.filter((item) => item !== message.question).slice(0, 2).map((item) => <button key={item} onClick={() => void ask(item)}>{item}</button>)}</div></div>}</div></div></article>)}
+                {isAnswering && <div className="assistant-message thinking"><span className="response-icon"><LoaderCircle size={17} className="spinner" /></span><div><h2>Belgede aranıyor</h2><span><i /><i /><i /></span></div></div>}
+              </div>
+              <div className="conversation-end" ref={conversationEndRef} />
+            </>}
+          </div>
+          {hasDocument && <div className="composer-dock"><div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} placeholder="Belge hakkında bir soru sor…" rows={2} disabled={isAnswering} /><div><span>Yanıtlar açık belgeye dayanır · Enter ile gönder</span><button aria-label="Soruyu gönder" disabled={!question.trim() || status !== "ready" || isAnswering} onClick={() => void ask()}><ArrowUp size={17} /></button></div></div></div>}
         </div>
       </main>
 
       {sourceOpen && <button className="panel-backdrop" aria-label="Kaynak panelini kapat" onClick={() => setSourceOpen(false)} />}
       <aside className={`source-panel ${sourceOpen ? "open" : ""}`}>
-        <div className="source-title"><div><span>Kaynak belge</span><small>Gerçek sayfa ve çıkarılmış metin</small></div><div className="source-actions"><button onClick={() => inputRef.current?.click()}><FolderOpen size={15} /> Değiştir</button><button className="close-source" onClick={() => setSourceOpen(false)} aria-label="Kaynak panelini kapat"><X size={15} /></button></div></div>
+        <div className="source-title"><div><span>Belge görünümü</span><small>PDF sayfası ve çıkarılmış metin</small></div><div className="source-actions"><button onClick={() => inputRef.current?.click()} title="Mevcut belgeyi kapatmadan başka bir PDF aç"><FolderOpen size={15} /> Başka PDF aç</button><button className="close-source" onClick={() => setSourceOpen(false)} aria-label="Belge görünümünü kapat"><X size={15} /></button></div></div>
         {hasDocument && <div className="source-tabs" role="tablist" aria-label="Kaynak görünümü">
           <button className={sourceMode === "pdf" ? "active" : ""} onClick={() => setSourceMode("pdf")} disabled={!pdfData} role="tab" aria-selected={sourceMode === "pdf"}><FileImage size={13} /> PDF</button>
           <button className={sourceMode === "text" ? "active" : ""} onClick={() => setSourceMode("text")} role="tab" aria-selected={sourceMode === "text"}><ScanText size={13} /> Metin</button>
